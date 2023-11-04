@@ -4,10 +4,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"hangman-api/models"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/thewhiterabbit1994/hangman-api/models"
 )
 
 func (s *PostgresStore) createGameTable() error {
@@ -34,7 +34,7 @@ func (s *PostgresStore) createGameTable() error {
 	return err2
 }
 
-func CreateGame(Secret_word string, User_Id int) (*models.Game, error) {
+func (s *PostgresStore) CreateGame(Secret_word string, User_Id int) (*models.Game, error) {
 
 	thisGame := models.Game{
 		User_Id:         User_Id,
@@ -46,23 +46,23 @@ func CreateGame(Secret_word string, User_Id int) (*models.Game, error) {
 		Finished_at:     time.Time{},
 	}
 
-	fmt.Println(thisGame)
-
 	query := `
 	INSERT INTO GAMES (userId, sercet_word, guessedLetters, status, created_at, finished_at)
 	VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
 	lastInsertId := 0
-	store.db.QueryRow(query, thisGame.User_Id, thisGame.Secret_word, thisGame.Guessed_letters, thisGame.Status, thisGame.Created_at, thisGame.Finished_at).Scan(&lastInsertId)
+	insertErr := s.db.QueryRow(query, thisGame.User_Id, thisGame.Secret_word, thisGame.Guessed_letters, thisGame.Status, thisGame.Created_at, thisGame.Finished_at).Scan(&lastInsertId)
 
-	fmt.Println("last inserted id in create is : ", lastInsertId)
+	if insertErr != nil {
+		return nil, insertErr
+	}
 	thisGame.ID = lastInsertId
 
 	return &thisGame, nil
 
 }
 
-func GetSingleGameById(id int) (*models.Game, error) {
-	rows, err := store.db.Query("SELECT * FROM GAMES WHERE ID = $1", id)
+func (s *PostgresStore) GetSingleGameById(id int) (*models.Game, error) {
+	rows, err := s.db.Query("SELECT * FROM GAMES WHERE ID = $1", id)
 	if err != nil {
 		return nil, err
 	}
@@ -73,10 +73,10 @@ func GetSingleGameById(id int) (*models.Game, error) {
 	return nil, errors.New("not found")
 }
 
-func GetSingleUsersGames(id, page, limit int) ([]*models.Game, error) {
+func (s *PostgresStore) GetSingleUsersGames(id, page, limit int) ([]*models.Game, error) {
 	offset := page * limit
 	query := "SELECT * FROM GAMES WHERE userId = $1 ORDER BY id OFFSET $2 ROWS FETCH NEXT $3 ROWS ONLY"
-	rows, err := store.db.Query(query, id, offset, limit)
+	rows, err := s.db.Query(query, id, offset, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -91,25 +91,7 @@ func GetSingleUsersGames(id, page, limit int) ([]*models.Game, error) {
 	return games, nil
 }
 
-func HandleGuessLetter(g *models.Game, character string) error {
-	exists := strings.Contains(g.Secret_word, character)
-
-	g.Guessed_letters += character
-
-	if !exists {
-		g.Chances--
-	}
-
-	if g.Chances < 1 {
-		g.Status = "lost"
-	}
-
-	guessLetters := models.BuildGuessedLetterJSON(g)
-	dashifiedString := models.DashifyString(g.Secret_word, guessLetters)
-
-	if hasDash := strings.Contains(dashifiedString, "-"); !hasDash {
-		g.Status = "won"
-	}
+func (s *PostgresStore) HandleGuessLetter(g *models.Game, character string) error {
 
 	query := `
 		UPDATE GAMES
@@ -117,10 +99,9 @@ func HandleGuessLetter(g *models.Game, character string) error {
 		WHERE id = $4;
 	`
 
-	_, err := store.db.Exec(query, g.Guessed_letters, g.Chances, g.Status, g.ID)
+	_, err := s.db.Exec(query, g.Guessed_letters, g.Chances, g.Status, g.ID)
 
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 
@@ -128,22 +109,13 @@ func HandleGuessLetter(g *models.Game, character string) error {
 
 }
 
-func scanIntoGames(rows *sql.Rows) (*models.Game, error) {
-	g := new(models.Game)
-	if err := rows.Scan(&g.ID, &g.User_Id, &g.Secret_word, &g.Guessed_letters, &g.Chances, &g.Status, &g.Created_at, &g.Finished_at); err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-	return g, nil
-}
-
-func getStatistics(str string, id int, target *int, wg *sync.WaitGroup) {
+func getStatistics(s *PostgresStore, str string, id int, target *int, wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
 	query := `SELECT * FROM GAMES WHERE status = $1 AND userId = $2`
 
-	rows, err := store.db.Query(query, str, id)
+	rows, err := s.db.Query(query, str, id)
 	if err != nil {
 		fmt.Println("err : ", err)
 	}
@@ -156,18 +128,27 @@ func getStatistics(str string, id int, target *int, wg *sync.WaitGroup) {
 	*target = count
 }
 
-func FetchStatistics(id int) models.StatisticsDto {
+func (s *PostgresStore) FetchStatistics(id int) models.StatisticsDto {
 
 	var wg sync.WaitGroup
 	wg.Add(3)
 
 	r := models.StatisticsDto{}
-	go getStatistics("won", id, &r.WonCount, &wg)
-	go getStatistics("lost", id, &r.LostCount, &wg)
-	go getStatistics("ongoing", id, &r.OngoingCount, &wg)
+	go getStatistics(s, "won", id, &r.WonCount, &wg)
+	go getStatistics(s, "lost", id, &r.LostCount, &wg)
+	go getStatistics(s, "ongoing", id, &r.OngoingCount, &wg)
 
 	wg.Wait()
 
 	return r
 
+}
+
+func scanIntoGames(rows *sql.Rows) (*models.Game, error) {
+	g := new(models.Game)
+	if err := rows.Scan(&g.ID, &g.User_Id, &g.Secret_word, &g.Guessed_letters, &g.Chances, &g.Status, &g.Created_at, &g.Finished_at); err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	return g, nil
 }

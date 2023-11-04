@@ -1,48 +1,69 @@
 package handlers
 
 import (
-	"hangman-api/database"
-	"hangman-api/models"
+	"encoding/json"
 	"net/http"
+	"strconv"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/go-chi/chi/v5"
+	dataprocesslayer "github.com/thewhiterabbit1994/hangman-api/data-process-layer"
+	"github.com/thewhiterabbit1994/hangman-api/models"
 )
 
-func HandleGetUsers(c *fiber.Ctx) error {
+func (h *HandlerService) HandleGetUsers(w http.ResponseWriter, r *http.Request) {
+	body := new(models.PaginationDto)
 
-	body := new(models.GetUsersDto)
-	if err := c.BodyParser(body); err != nil {
-		body.Page = 0
+	if err := json.NewDecoder(r.Body).Decode(body); err != nil {
 		body.Limit = 10
 	}
 
-	users, err := database.GetUsers(body.Page, body.Limit)
+	users, err := h.db.GetUsers(body.Page, body.Limit)
 
 	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
+		WriteResponse(w, http.StatusInternalServerError, "this one is on us")
+		return
 	}
 
 	var result []models.UserDto
 
 	for _, s := range users {
-		result = append(result, models.ConvertToUserDto(s))
+		result = append(result, dataprocesslayer.ConvertToUserDto(s))
 	}
 
-	return c.Status(http.StatusOK).JSON(result)
+	WriteJSON(w, http.StatusOK, result)
+
 }
 
-func HandleSingleUser(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
+func (h *HandlerService) HandleGetUser(w http.ResponseWriter, r *http.Request) {
+	userIdString := chi.URLParam(r, "id")
+	userId, err := strconv.Atoi(userIdString)
 
 	if err != nil {
-		return WriteResponse(c, http.StatusNotFound, "user not found")
+		WriteResponse(w, http.StatusNotFound, "user not found")
+		return
 	}
 
-	thisUser, err := database.GetUserByID(id)
+	thisUser, err := h.db.GetUserByID(userId)
 	if err != nil {
-		return WriteResponse(c, http.StatusNotFound, "user not found")
-
+		WriteResponse(w, http.StatusNotFound, "user not found")
+		return
 	}
-	user := models.ConvertToUserDto(thisUser)
-	return c.Status(http.StatusOK).JSON(user)
+
+	user := dataprocesslayer.ConvertToUserDto(thisUser)
+
+	WriteJSON(w, http.StatusOK, user)
+}
+
+func (h *HandlerService) HandleGetUserStatistics(w http.ResponseWriter, r *http.Request) {
+
+	userIdString := chi.URLParam(r, "id")
+	userId, err := strconv.Atoi(userIdString)
+
+	if err != nil {
+		WriteResponse(w, http.StatusNotFound, "user not found")
+		return
+	}
+	statistics := h.db.FetchStatistics(userId)
+
+	WriteJSON(w, http.StatusOK, statistics)
 }

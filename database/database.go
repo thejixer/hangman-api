@@ -2,28 +2,22 @@ package database
 
 import (
 	"database/sql"
-	"hangman-api/models"
+	"fmt"
+	"os"
 
 	_ "github.com/lib/pq"
 )
-
-var store *PostgresStore
-
-type Storage interface {
-	CreateUser(*models.User) error
-}
 
 type PostgresStore struct {
 	db *sql.DB
 }
 
-func (s *PostgresStore) Init() error {
-	s.createGameTable()
-	return s.CreateUserTable()
-}
+func NewPostgresStore(dbName string) (*PostgresStore, error) {
 
-func NewPostgresStore() (*PostgresStore, error) {
-	conString := "user=postgres dbname=hangman password=postgres sslmode=disable"
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+
+	conString := fmt.Sprintf("user=%v dbname=%v password=%v sslmode=disable", dbUser, dbName, dbPassword)
 	db, err := sql.Open("postgres", conString)
 
 	if err != nil {
@@ -34,11 +28,12 @@ func NewPostgresStore() (*PostgresStore, error) {
 		return nil, err
 	}
 
-	store = &PostgresStore{
-		db: db,
-	}
-
 	return &PostgresStore{
 		db: db,
 	}, nil
+}
+
+func (s *PostgresStore) Init() error {
+	s.createGameTable()
+	return s.CreateUserTable()
 }

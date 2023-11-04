@@ -3,14 +3,14 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"hangman-api/database"
-	"hangman-api/models"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/go-chi/chi/v5"
+	dataprocesslayer "github.com/thewhiterabbit1994/hangman-api/data-process-layer"
+	"github.com/thewhiterabbit1994/hangman-api/models"
 )
 
 func getRandomWord() (string, error) {
@@ -29,184 +29,187 @@ func getRandomWord() (string, error) {
 	return words[0], nil
 }
 
-func HandleCreateGame(c *fiber.Ctx) error {
+func (h *HandlerService) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 
-	userIdString := fmt.Sprintf("%v", c.Locals("userId"))
-
-	userId, err := strconv.Atoi(userIdString)
-
+	userId, err := GetUserIdByToken(r)
 	if err != nil {
-		return WriteResponse(c, http.StatusUnauthorized, "forbidden resources")
+		WriteResponse(w, http.StatusUnauthorized, "forbidden resources")
+		return
+	}
+
+	thisUser, err := h.db.GetUserByID(userId)
+	if err != nil {
+		WriteResponse(w, http.StatusUnauthorized, "forbidden resources")
+		return
 	}
 
 	secret_word, err := getRandomWord()
-	thisUser, err := database.GetUserByID(userId)
-
 	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
+		WriteResponse(w, http.StatusInternalServerError, "this one is on us: error fetching random word from external api")
+		return
 	}
 
-	user := models.ConvertToUserDto(thisUser)
+	user := dataprocesslayer.ConvertToUserDto(thisUser)
+	thisGame, err := h.db.CreateGame(secret_word, userId)
 	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
-	}
-	thisGame, err := database.CreateGame(secret_word, userId)
-	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
+		WriteResponse(w, http.StatusInternalServerError, "this one is on us")
+		return
 	}
 
-	game, err := models.ConvertGameIntoGamesDto(thisGame, user)
-	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
-	}
+	game := dataprocesslayer.ConvertGameIntoGamesDto(thisGame, user)
 
-	return c.JSON(game)
+	WriteJSON(w, http.StatusOK, game)
 }
 
-func HandleGetSingleGame(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
+func (h *HandlerService) HandleGetSingleGame(w http.ResponseWriter, r *http.Request) {
+	gameIdString := chi.URLParam(r, "id")
+	gameId, err := strconv.Atoi(gameIdString)
 
 	if err != nil {
-		return WriteResponse(c, http.StatusNotFound, "game not found")
+		WriteResponse(w, http.StatusNotFound, "game not found")
+		return
 	}
 
-	thisGame, err := database.GetSingleGameById(id)
+	thisGame, err := h.db.GetSingleGameById(gameId)
 	if err != nil {
-		return WriteResponse(c, http.StatusNotFound, "game not found")
+		WriteResponse(w, http.StatusNotFound, "game not found")
+		return
 	}
-	thisUser, err := database.GetUserByID(thisGame.User_Id)
+	thisUser, err := h.db.GetUserByID(thisGame.User_Id)
 	if err != nil {
-		return WriteResponse(c, http.StatusNotFound, "user not found")
-	}
-	user := models.ConvertToUserDto(thisUser)
-	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
+		WriteResponse(w, http.StatusInternalServerError, "this one is on us")
+		return
 	}
 
-	game, err := models.ConvertGameIntoGamesDto(thisGame, user)
-	if err != nil {
-		return WriteResponse(c, http.StatusUnauthorized, "forbidden resources")
-	}
+	user := dataprocesslayer.ConvertToUserDto(thisUser)
+	game := dataprocesslayer.ConvertGameIntoGamesDto(thisGame, user)
 
-	return c.JSON(game)
-
+	WriteJSON(w, http.StatusOK, game)
 }
 
-func HandleGetMyGames(c *fiber.Ctx) error {
-
-	userIdString := fmt.Sprintf("%v", c.Locals("userId"))
-
-	userId, err := strconv.Atoi(userIdString)
-
+func (h *HandlerService) HandleGetMyGames(w http.ResponseWriter, r *http.Request) {
+	userId, err := GetUserIdByToken(r)
 	if err != nil {
-		return WriteResponse(c, http.StatusUnauthorized, "forbidden resources")
+		WriteResponse(w, http.StatusUnauthorized, "forbidden resources")
+		return
 	}
-	body := new(models.GetMyGamesDto)
-	if err := c.BodyParser(body); err != nil {
-		body.Page = 0
+	body := new(models.PaginationDto)
+
+	if err := json.NewDecoder(r.Body).Decode(body); err != nil {
 		body.Limit = 10
 	}
 
-	thisUser, err := database.GetUserByID(userId)
 	if err != nil {
-		return WriteResponse(c, http.StatusUnauthorized, "forbidden resources")
-	}
-	user := models.ConvertToUserDto(thisUser)
-	MyGames, err := database.GetSingleUsersGames(userId, body.Page, body.Limit)
-	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
+		WriteResponse(w, http.StatusUnauthorized, "forbidden resources")
+		return
 	}
 
-	var games []models.GameDto
+	thisUser, err := h.db.GetUserByID(userId)
+	user := dataprocesslayer.ConvertToUserDto(thisUser)
+
+	if err != nil {
+		WriteResponse(w, http.StatusUnauthorized, "forbidden resources")
+		return
+	}
+
+	MyGames, err := h.db.GetSingleUsersGames(userId, body.Page, body.Limit)
+	if err != nil {
+		WriteResponse(w, http.StatusInternalServerError, "this one is on us")
+		return
+	}
+
+	var games = []models.GameDto{}
 
 	for _, s := range MyGames {
-		game, err := models.ConvertGameIntoGamesDto(s, user)
-		if err != nil {
-			return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
-		}
+		game := dataprocesslayer.ConvertGameIntoGamesDto(s, user)
 
 		games = append(games, *game)
 	}
 
-	return c.Status(http.StatusOK).JSON(games)
+	WriteJSON(w, http.StatusOK, games)
 }
 
-func HandleGuessLetter(c *fiber.Ctx) error {
+func (h *HandlerService) HandleGuessLetter(w http.ResponseWriter, r *http.Request) {
 
-	userIdString := fmt.Sprintf("%v", c.Locals("userId"))
-
-	userId, err := strconv.Atoi(userIdString)
-
+	fmt.Println("yes")
+	userId, err := GetUserIdByToken(r)
 	if err != nil {
-		return WriteResponse(c, http.StatusUnauthorized, "forbidden resources")
+		WriteResponse(w, http.StatusUnauthorized, "forbidden resources")
+		return
 	}
+
 	body := new(models.GuessLetterDto)
-	if err := c.BodyParser(body); err != nil {
-		return WriteResponse(c, http.StatusBadRequest, "please provide valid information")
+	if err := json.NewDecoder(r.Body).Decode(body); err != nil {
+		WriteResponse(w, http.StatusBadRequest, "bad request: insufficient data")
+		return
 	}
-
 	if len(body.Char) > 1 {
-		return WriteResponse(c, http.StatusBadRequest, "please provide only a single letter")
+		WriteResponse(w, http.StatusBadRequest, "please provide only a single letter")
+		return
 	}
-
-	thisUser, err := database.GetUserByID(userId)
+	thisUser, err := h.db.GetUserByID(userId)
 	if err != nil {
-		return WriteResponse(c, http.StatusUnauthorized, "forbidden resources")
+		WriteResponse(w, http.StatusUnauthorized, "forbidden resources")
+		return
 	}
-
-	thisGame, err := database.GetSingleGameById(body.GameId)
-
+	thisGame, err := h.db.GetSingleGameById(body.GameId)
 	if err != nil {
-		return WriteResponse(c, http.StatusNotFound, "bad request: no such game found")
+		WriteResponse(w, http.StatusNotFound, "bad request: no such game found")
+		return
+	}
+	if thisGame.User_Id != thisUser.ID {
+		WriteResponse(w, http.StatusUnauthorized, "unathorized")
+		return
 	}
 
 	if thisGame.Chances < 1 || thisGame.Status != "ongoing" {
-		return WriteResponse(c, http.StatusBadRequest, "the game is over, please start a new game")
+		WriteResponse(w, http.StatusBadRequest, "the game is over, please start a new game")
+		return
 	}
 
 	if exists := strings.Contains(thisGame.Guessed_letters, body.Char); exists {
-		return WriteResponse(c, http.StatusBadRequest, "you have guessed this letter before, try a new character")
+		WriteResponse(w, http.StatusBadRequest, "you have guessed this letter before, try a new character")
+		return
 	}
 
-	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
-	}
-	if thisGame.User_Id != thisUser.ID {
-		return WriteResponse(c, fiber.StatusUnauthorized, "unathorized")
+	exists := strings.Contains(thisGame.Secret_word, body.Char)
+
+	thisGame.Guessed_letters += body.Char
+
+	if !exists {
+		thisGame.Chances--
 	}
 
-	err2 := database.HandleGuessLetter(thisGame, body.Char)
-	if err2 != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
+	if thisGame.Chances < 1 {
+		thisGame.Status = "lost"
 	}
 
-	user := models.ConvertToUserDto(thisUser)
-	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
+	guessLetters := dataprocesslayer.BuildGuessedLetterJSON(thisGame)
+	dashifiedString := dataprocesslayer.DashifyString(thisGame.Secret_word, guessLetters)
+
+	if hasDash := strings.Contains(dashifiedString, "-"); !hasDash {
+		thisGame.Status = "won"
 	}
 
-	game, err := models.ConvertGameIntoGamesDto(thisGame, user)
-	if err != nil {
-		return WriteResponse(c, http.StatusInternalServerError, "this one is on us")
+	updateErr := h.db.HandleGuessLetter(thisGame, body.Char)
+
+	if updateErr != nil {
+		WriteResponse(w, http.StatusInternalServerError, "this one's on us")
+		return
 	}
+
+	user := dataprocesslayer.ConvertToUserDto(thisUser)
+	game := dataprocesslayer.ConvertGameIntoGamesDto(thisGame, user)
 
 	if game.Chances == 0 {
-		return WriteResponse(c, http.StatusOK, fmt.Sprintf("you lost, the correct word was : %v", thisGame.Secret_word))
+		WriteResponse(w, http.StatusOK, fmt.Sprintf("you lost, the correct word was : %v", thisGame.Secret_word))
+		return
 	}
 	if game.Status == "won" {
-		return WriteResponse(c, http.StatusOK, "congatulations, you won. start a new game now")
+		WriteResponse(w, http.StatusOK, "congatulations, you won. start a new game now")
+		return
 	}
 
-	return c.Status(http.StatusOK).JSON(game)
-}
+	WriteJSON(w, http.StatusOK, game)
 
-func HandleGameStatistics(c *fiber.Ctx) error {
-	userId, err := c.ParamsInt("id")
-
-	if err != nil {
-		return fmt.Errorf("bad request")
-	}
-	r := database.FetchStatistics(userId)
-
-	return c.Status(http.StatusOK).JSON(r)
 }

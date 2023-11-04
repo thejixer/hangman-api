@@ -16,7 +16,3 @@ type UserDto struct {
 	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"createdAt"`
 }
-
-func ConvertToUserDto(u *User) UserDto {
-	return UserDto{ID: u.ID, Name: u.Name, Email: u.Email, CreatedAt: u.CreatedAt}
-}

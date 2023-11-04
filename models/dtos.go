@@ -1,17 +1,8 @@
 package models
 
-type Response struct {
+type ResponseDto struct {
 	Msg        string `json:"msg"`
 	StatusCode int    `json:"statusCode"`
-}
-
-type TokenDto struct {
-	Token string `json:"token"`
-}
-
-type LoginDto struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
 }
 
 type SignUpDto struct {
@@ -20,12 +11,16 @@ type SignUpDto struct {
 	Password string `json:"password"`
 }
 
-type GetUsersDto struct {
-	Page  int `json:"page"`
-	Limit int `json:"limit"`
+type LoginDto struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
-type GetMyGamesDto struct {
+type TokenDto struct {
+	Token string `json:"token"`
+}
+
+type PaginationDto struct {
 	Page  int `json:"page"`
 	Limit int `json:"limit"`
 }

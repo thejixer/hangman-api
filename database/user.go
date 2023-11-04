@@ -3,9 +3,10 @@ package database
 import (
 	"database/sql"
 	"errors"
-	"hangman-api/models"
-	"hangman-api/utils"
 	"time"
+
+	"github.com/thewhiterabbit1994/hangman-api/models"
+	"github.com/thewhiterabbit1994/hangman-api/utils"
 )
 
 func (s *PostgresStore) CreateUserTable() error {
@@ -23,8 +24,7 @@ func (s *PostgresStore) CreateUserTable() error {
 	return err
 }
 
-func NewUser(Name, Email, Password string) (*models.User, error) {
-
+func (s *PostgresStore) CreateUser(Name, Email, Password string) (*models.User, error) {
 	hashedPassword, err := utils.HashPassword(Password)
 	if err != nil {
 		return nil, err
@@ -42,15 +42,17 @@ func NewUser(Name, Email, Password string) (*models.User, error) {
 	VALUES ($1, $2, $3, $4) RETURNING id`
 	lastInsertId := 0
 
-	store.db.QueryRow(query, newUser.Name, newUser.Email, newUser.Password, newUser.CreatedAt).Scan(&lastInsertId)
-
+	insertErr := s.db.QueryRow(query, newUser.Name, newUser.Email, newUser.Password, newUser.CreatedAt).Scan(&lastInsertId)
+	if insertErr != nil {
+		return nil, insertErr
+	}
 	newUser.ID = lastInsertId
 
 	return newUser, nil
 }
 
-func GetUserByEmail(email string) (*models.User, error) {
-	rows, err := store.db.Query("SELECT * FROM USERS WHERE EMAIL = $1", email)
+func (s *PostgresStore) GetUserByEmail(email string) (*models.User, error) {
+	rows, err := s.db.Query("SELECT * FROM USERS WHERE EMAIL = $1", email)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +63,8 @@ func GetUserByEmail(email string) (*models.User, error) {
 	return nil, errors.New("not found")
 }
 
-func GetUserByID(id int) (*models.User, error) {
-	rows, err := store.db.Query("SELECT * FROM USERS WHERE ID = $1", id)
+func (s *PostgresStore) GetUserByID(id int) (*models.User, error) {
+	rows, err := s.db.Query("SELECT * FROM USERS WHERE ID = $1", id)
 	if err != nil {
 		return nil, err
 	}
@@ -73,10 +75,10 @@ func GetUserByID(id int) (*models.User, error) {
 	return nil, errors.New("not found")
 }
 
-func GetUsers(page, limit int) ([]*models.User, error) {
+func (s *PostgresStore) GetUsers(page, limit int) ([]*models.User, error) {
 	offset := page * limit
 	query := "SELECT * FROM USERS ORDER BY id OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY"
-	rows, err := store.db.Query(query, offset, limit)
+	rows, err := s.db.Query(query, offset, limit)
 	if err != nil {
 		return nil, err
 	}
