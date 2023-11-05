@@ -7,10 +7,10 @@ import (
 )
 
 type HandlerService struct {
-	db *database.PostgresStore
+	db database.Storage
 }
 
-func NewHandlerService(store *database.PostgresStore) *HandlerService {
+func NewHandlerService(store database.Storage) *HandlerService {
 	return &HandlerService{
 		db: store,
 	}
